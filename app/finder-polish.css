@@ -1,0 +1,110 @@
+.formulary-preload-banner {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+  padding: 10px 13px;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.formulary-preload-banner strong { font-size: 0.84rem; }
+.formulary-preload-banner small { color: #475569; }
+.formulary-preload-warning { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+.formulary-preload-ready { border-color: #86efac; background: #f0fdf4; color: #166534; }
+
+.finder-tone-location,
+.finder-tone-doctors,
+.finder-tone-medications,
+.finder-tone-pharmacy,
+.finder-tone-results,
+.finder-tone-compare {
+  position: relative;
+  overflow: visible;
+  border-width: 2px !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.07) !important;
+}
+.finder-tone-location { border-color: #93c5fd !important; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 38%) !important; }
+.finder-tone-doctors { border-color: #86efac !important; background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 42%) !important; }
+.finder-tone-medications { border-color: #c4b5fd !important; background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 42%) !important; }
+.finder-tone-pharmacy { border-color: #fcd34d !important; background: linear-gradient(135deg, #fffbeb 0%, #ffffff 42%) !important; }
+.finder-tone-results { border-color: #67e8f9 !important; background: linear-gradient(135deg, #ecfeff 0%, #ffffff 30%) !important; }
+.finder-tone-compare { border-color: #a5b4fc !important; background: linear-gradient(135deg, #eef2ff 0%, #ffffff 28%) !important; }
+
+.finder-tone-location h2 { color: #1e40af !important; }
+.finder-tone-doctors h2 { color: #166534 !important; }
+.finder-tone-medications h2 { color: #6d28d9 !important; }
+.finder-tone-pharmacy h2 { color: #92400e !important; }
+.finder-tone-results h2 { color: #155e75 !important; }
+.finder-tone-compare h2 { color: #3730a3 !important; }
+
+.medicare-standalone-content table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+.medicare-standalone-content table th,
+.medicare-standalone-content table td {
+  padding: 14px 14px !important;
+  line-height: 1.5 !important;
+}
+.medicare-standalone-content table th:first-child {
+  padding-left: 16px !important;
+}
+.medicare-standalone-content table th small,
+.medicare-standalone-content table td small {
+  display: block;
+  margin-top: 6px;
+  line-height: 1.45;
+}
+.medicare-standalone-content table td > div {
+  margin-block: 3px;
+}
+
+.finder-pharmacy-row > th,
+.finder-pharmacy-row > td {
+  background: #fffbeb !important;
+  border-top: 3px solid #f59e0b !important;
+}
+.finder-doctor-row > th,
+.finder-doctor-row > td {
+  background: #f0fdf4 !important;
+}
+.finder-first-drug-row > th,
+.finder-first-drug-row > td {
+  border-top: 5px solid #8b5cf6 !important;
+}
+.finder-drug-row > th,
+.finder-drug-row > td {
+  background: #faf5ff !important;
+  padding-top: 18px !important;
+  padding-bottom: 18px !important;
+}
+.finder-drug-row > th {
+  color: #5b21b6 !important;
+  font-size: 0.81rem !important;
+}
+.finder-drug-row td > div {
+  min-height: 54px;
+  padding: 10px 12px !important;
+}
+.finder-first-month-row > th,
+.finder-first-month-row > td {
+  border-top: 5px solid #0ea5e9 !important;
+}
+.finder-month-row > th,
+.finder-month-row > td {
+  background: #f0f9ff !important;
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+}
+.finder-month-row > th { color: #075985 !important; }
+
+@media (max-width: 700px) {
+  .formulary-preload-banner { margin-bottom: 12px; }
+  .medicare-standalone-content table th,
+  .medicare-standalone-content table td { padding: 12px 10px !important; }
+  .finder-drug-row > th,
+  .finder-drug-row > td { padding-top: 16px !important; padding-bottom: 16px !important; }
+}
