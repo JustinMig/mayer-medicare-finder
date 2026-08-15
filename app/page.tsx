@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import MedicarePlanFinder from './MedicarePlanFinder'
+import MedicarePlanFinderPro from './MedicarePlanFinderPro'
 import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -32,9 +32,9 @@ export default async function MedicareFinderHome() {
       <main className="medicare-standalone-content">
         <div className="clients-page-heading medicare-page-heading">
           <h1>Medicare Plan Finder</h1>
-          <p className="subtle">Search Mississippi Medicare Advantage plans, compare key benefits, and check selected doctor offices against verified plan-network records.</p>
+          <p className="subtle">Compare Mississippi Medicare Advantage plans by benefits, doctors, medications, and estimated monthly and annual costs.</p>
         </div>
-        <MedicarePlanFinder />
+        <MedicarePlanFinderPro />
       </main>
     </div>
   )
