@@ -11,6 +11,7 @@ Standalone Next.js application separated from Mayer Insurance CRM.
 - Exact doctor office selection
 - Live/carrier-backed network verification where connected
 - Only In-Network Doctors filter
+- Commissionable-only plan results
 - Shared Supabase plan/provider data with the CRM
 
 ## What is intentionally NOT included
