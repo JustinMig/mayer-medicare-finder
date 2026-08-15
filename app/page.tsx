@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import MedicarePlanFinderProV2 from './MedicarePlanFinderProV2'
 import FormularyPreloader from './FormularyPreloader'
 import FinderVisualEnhancer from './FinderVisualEnhancer'
+import MedicareWorkspace from './MedicareWorkspace'
 import './finder-polish.css'
 import { createClient } from '@/lib/supabase/server'
 
@@ -33,13 +34,15 @@ export default async function MedicareFinderHome() {
       </header>
 
       <main className="medicare-standalone-content">
-        <div className="clients-page-heading medicare-page-heading">
-          <h1>Medicare Plan Finder</h1>
-          <p className="subtle">Compare Mississippi Medicare Advantage plans by benefits, doctors, pharmacy, medications, and estimated monthly and annual costs.</p>
-        </div>
-        <FormularyPreloader />
-        <FinderVisualEnhancer />
-        <MedicarePlanFinderProV2 />
+        <MedicareWorkspace>
+          <div className="clients-page-heading medicare-page-heading">
+            <h1>Medicare Plan Finder</h1>
+            <p className="subtle">Compare Mississippi Medicare Advantage plans by benefits, doctors, pharmacy, medications, and estimated monthly and annual costs.</p>
+          </div>
+          <FormularyPreloader />
+          <FinderVisualEnhancer />
+          <MedicarePlanFinderProV2 />
+        </MedicareWorkspace>
       </main>
     </div>
   )
