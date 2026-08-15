@@ -28,13 +28,7 @@ type PlanRow = {
   benefit_details: Record<string, unknown> | null
 }
 
-type PlanDrugResult = DrugInput & Q1DrugMatch & {
-  estimated_fill_cost: number | null
-}
-
-function money(value: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
-}
+type PlanDrugResult = DrugInput & Q1DrugMatch & { estimated_fill_cost: number | null }
 
 function numericMoney(value: string | null | undefined) {
   if (!value) return null
@@ -189,7 +183,7 @@ async function persistDrugCache(plan: PlanRow, drug: DrugInput, match: Q1DrugMat
     }, { onConflict: 'medicare_plan_id,drug_id' })
 
     if (match.covered && match.tier && match.preferred_30_day) {
-      const fixed = numericMoney(match.preferred_30_day)
+      const fixed = match.preferred_30_day.includes('$') ? numericMoney(match.preferred_30_day) : null
       const percent = match.preferred_30_day.match(/(\d+(?:\.\d+)?)\s*%/)
       await admin.from('medicare_plan_drug_cost_shares').upsert({
         medicare_plan_id: plan.id,
@@ -227,7 +221,11 @@ export async function POST(request: NextRequest) {
   if (!claimsData?.claims) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   let body: { plan_ids?: string[]; drugs?: DrugInput[]; medicaid?: string }
-  try { body = await request.json() as typeof body } catch { return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 }) }
+  try {
+    body = await request.json() as typeof body
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
 
   const planIds = [...new Set((body.plan_ids || []).filter(Boolean))].slice(0, MAX_PLANS)
   const drugs = (body.drugs || [])
@@ -236,7 +234,9 @@ export async function POST(request: NextRequest) {
     .filter((drug, index, all) => all.findIndex((item) => item.rxcui === drug.rxcui) === index)
     .slice(0, MAX_DRUGS)
 
-  if (!planIds.length) return NextResponse.json({ plans: {}, part_b_standard_premium: PART_B_STANDARD_PREMIUM_2026, part_d_oop_cap: PART_D_OOP_CAP_2026 })
+  if (!planIds.length) {
+    return NextResponse.json({ plans: {}, part_b_standard_premium: PART_B_STANDARD_PREMIUM_2026, part_d_oop_cap: PART_D_OOP_CAP_2026 })
+  }
 
   const { data: planData, error } = await supabase.from('medicare_plans').select(`
     id, carrier, plan_name, contract_id, plan_id, segment_id, monthly_premium,
@@ -254,7 +254,7 @@ export async function POST(request: NextRequest) {
       ? await settleWithConcurrency(drugs, 4, async (drug) => {
           const match = await fetchQ1DrugMatch(planDetails.formulary_url as string, drug.name)
           const estimated = costShareAmount(match.preferred_30_day, match.retail_30_day)
-          void persistDrugCache(plan, drug, match)
+          await persistDrugCache(plan, drug, match)
           return { ...drug, ...match, estimated_fill_cost: estimated } satisfies PlanDrugResult
         })
       : drugs.map((drug) => ({
