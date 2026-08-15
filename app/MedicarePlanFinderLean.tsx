@@ -9,7 +9,7 @@ const CARRIERS = ['All carriers', 'Aetna', 'Devoted', 'HealthSpring', 'Humana', 
 type MedicarePlan = {
   id: string; carrier: string; plan_name: string; contract_id: string; plan_id: string; segment_id: string; plan_key: string; plan_type: string | null; snp_type: string | null
   monthly_premium: string | null; moop_in_network: string | null; pcp_copay: string | null; specialist_copay: string | null; inpatient_hospital: string | null
-  ambulance_copay: string | null; emergency_room_copay: string | null; urgent_care_copay: string | null; drug_deductible: string | null; drug_oop_cap: string | null
+  ambulance_copay: string | null; emergency_room_copay: string | null; urgent_care_copay: string | null
   part_b_standard_premium: string | null; part_b_credit: string | null; part_b_net_standard_cost: string | null
   dental_annual_allowance: string | null; vision_annual_allowance?: string | null; hearing_annual_allowance?: string | null
   vision_summary: string | null; hearing_summary: string | null; dental_benefit: string | null; vision_benefit: string | null; hearing_benefit: string | null
@@ -143,7 +143,7 @@ export default function MedicarePlanFinderLean() {
     </section>}
 
     {selectedPlans.length > 0 && showComparison && <section className={s.compareSection}>
-      <div className={s.compareHeader}><div><span>STEP 4</span><h2>Side-by-side comparison</h2><p>Compare medical benefits, allowances, and selected doctors without prescription-processing overhead.</p></div><div className={s.compareActions}><label><input type="checkbox" checked={showDifferencesOnly} onChange={(e) => setShowDifferencesOnly(e.target.checked)} /> Show differences only</label><button type="button" className={s.secondaryButton} onClick={() => setShowComparison(false)}>Hide comparison</button></div></div>
+      <div className={s.compareHeader}><div><span>STEP 4</span><h2>Side-by-side comparison</h2><p>Compare medical benefits, allowances, and selected doctors.</p></div><div className={s.compareActions}><label><input type="checkbox" checked={showDifferencesOnly} onChange={(e) => setShowDifferencesOnly(e.target.checked)} /> Show differences only</label><button type="button" className={s.secondaryButton} onClick={() => setShowComparison(false)}>Hide comparison</button></div></div>
       <div className={s.tableScroll}><table className={s.compareTable}><thead><tr><th>Benefit / cost</th>{selectedPlans.map((plan) => <th key={plan.id}><span>{plan.carrier}</span><strong>{plan.plan_name}</strong><small>{plan.plan_key}</small></th>)}</tr></thead><tbody>
         {visibleRows.map((row) => <tr key={row.label}><th>{row.label}</th>{selectedPlans.map((plan) => cell(row.get(plan)))}</tr>)}
         {selectedDoctors.map((doctor) => <tr key={`doctor-${doctor.slot_id}`} className={s.doctorCompareRow}><th>Doctor · {doctor.name}</th>{selectedPlans.map((plan) => { const match = network?.plans?.[plan.id]?.doctor_matches?.find((item) => item.slot_id === doctor.slot_id); return <td key={plan.id}>{match ? <DoctorBadge match={match} /> : 'Checking…'}</td> })}</tr>)}
@@ -151,6 +151,6 @@ export default function MedicarePlanFinderLean() {
     </section>}
 
     {selectedPlans.length > 0 && !showComparison && <button type="button" className={s.floatingCompare} onClick={() => setShowComparison(true)}>COMPARE {selectedPlans.length} {selectedPlans.length === 1 ? 'PLAN' : 'PLANS'}</button>}
-    <footer className={s.sourceFooter}>Plan benefits use the Finder’s stored Medicare plan data and CMS references. Doctor identity/location uses CMS NPPES and network status is checked only when doctors are selected. Medication, formulary, pharmacy, and prescription-pricing data remain stored in the backend but are not loaded or processed by this Finder screen. Verify final enrollment details with Medicare.gov or the carrier.</footer>
+    <footer className={s.sourceFooter}>Plan benefits use the Finder’s stored Medicare plan data and CMS references. Doctor identity/location uses CMS NPPES and network status is checked only when doctors are selected. Verify final enrollment details with Medicare.gov or the carrier.</footer>
   </div>
 }
