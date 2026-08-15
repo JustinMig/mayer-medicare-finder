@@ -27,6 +27,123 @@ function fixedAndPercent(value: string | null) {
   }
 }
 
+function decodeEntities(value: string) {
+  return value
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+}
+
+function safeQ1Url(value: string | null | undefined) {
+  if (!value) return null
+  try {
+    const url = new URL(decodeEntities(value), 'https://q1medicare.com/')
+    if (!['q1medicare.com', 'www.q1medicare.com'].includes(url.hostname)) return null
+    url.protocol = 'https:'
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+function extractFormularyUrl(html: string) {
+  const patterns = [
+    /href\s*=\s*["']([^"']*PartD-BrowseMedicare-2026PlanFormulary\.php[^"']*)["']/gi,
+    /href\s*=\s*["']([^"']*MedicareAdvantage-2026MAPDPlanRxCostSharingDetails\.php[^"']*)["']/gi
+  ]
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const url = safeQ1Url(match[1])
+      if (url) return url
+    }
+  }
+  return null
+}
+
+function extractPlanDetailUrls(html: string, contractId: string, planId: string) {
+  const urls: string[] = []
+  for (const match of html.matchAll(/href\s*=\s*["']([^"']*MedicareAdvantage-[^"']*MedicareHealthPlanBenefits\.php[^"']*)["']/gi)) {
+    const safe = safeQ1Url(match[1])
+    if (!safe) continue
+    try {
+      const url = new URL(safe)
+      if ((url.searchParams.get('contractId') || '').toUpperCase() !== contractId.toUpperCase()) continue
+      if ((url.searchParams.get('planId') || '').padStart(3, '0') !== planId.padStart(3, '0')) continue
+      if (!urls.includes(safe)) urls.push(safe)
+    } catch {}
+  }
+  return urls
+}
+
+async function fetchQ1Html(url: string) {
+  const safe = safeQ1Url(url)
+  if (!safe) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 12000)
+  try {
+    const response = await fetch(safe, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'
+      },
+      signal: controller.signal,
+      cache: 'no-store'
+    })
+    if (!response.ok) return null
+    return await response.text()
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function resolveFormularyUrl(plan: PlanRow) {
+  if (plan.formulary_source_url) return plan.formulary_source_url
+
+  if (plan.q1_source_url) {
+    const details = await fetchQ1PlanDetails(plan.q1_source_url)
+    if (details?.formulary_url) return details.formulary_url
+
+    const sourceHtml = await fetchQ1Html(plan.q1_source_url)
+    const directFromSource = sourceHtml ? extractFormularyUrl(sourceHtml) : null
+    if (directFromSource) return directFromSource
+
+    try {
+      const modern = new URL(plan.q1_source_url)
+      modern.pathname = '/MedicareAdvantage-2026C-MedicareHealthPlanBenefits.php'
+      modern.searchParams.set('contractId', plan.contract_id)
+      modern.searchParams.set('planId', plan.plan_id.padStart(3, '0'))
+      const modernHtml = await fetchQ1Html(modern.toString())
+      const directFromModern = modernHtml ? extractFormularyUrl(modernHtml) : null
+      if (directFromModern) return directFromModern
+    } catch {}
+  }
+
+  const lookup = new URL('https://q1medicare.com/PartD-2026-MedicarePlanIDSearchPDPMAPD.php')
+  lookup.searchParams.set('contractId', plan.contract_id)
+  lookup.searchParams.set('planId', plan.plan_id.padStart(3, '0'))
+  const lookupHtml = await fetchQ1Html(lookup.toString())
+  if (!lookupHtml) return null
+
+  const direct = extractFormularyUrl(lookupHtml)
+  if (direct) return direct
+
+  const details = extractPlanDetailUrls(lookupHtml, plan.contract_id, plan.plan_id)
+  const msFirst = details.sort((a, b) => {
+    const aMs = /(?:state=MS|stateReg=[^&]*MS)/i.test(a) ? 1 : 0
+    const bMs = /(?:state=MS|stateReg=[^&]*MS)/i.test(b) ? 1 : 0
+    return bMs - aMs
+  })
+  for (const detailUrl of msFirst.slice(0, 6)) {
+    const html = await fetchQ1Html(detailUrl)
+    const formulary = html ? extractFormularyUrl(html) : null
+    if (formulary) return formulary
+  }
+  return null
+}
+
 async function requireUser() {
   const supabase = await createClient()
   const { data } = await supabase.auth.getClaims()
@@ -102,15 +219,11 @@ export async function POST() {
   }, { onConflict: 'medicare_plan_id' })
 
   try {
-    let formularyUrl = plan.formulary_source_url
-    if (!formularyUrl && plan.q1_source_url) {
-      const details = await fetchQ1PlanDetails(plan.q1_source_url)
-      formularyUrl = details?.formulary_url || null
-      if (formularyUrl) {
-        await admin.from('medicare_plans').update({ formulary_source_url: formularyUrl, updated_at: new Date().toISOString() }).eq('id', plan.id)
-      }
+    const formularyUrl = await resolveFormularyUrl(plan)
+    if (formularyUrl && formularyUrl !== plan.formulary_source_url) {
+      await admin.from('medicare_plans').update({ formulary_source_url: formularyUrl, updated_at: new Date().toISOString() }).eq('id', plan.id)
     }
-    if (!formularyUrl) throw new Error('No formulary source URL was available for this plan.')
+    if (!formularyUrl) throw new Error('No formulary source URL was available for this plan after current Q1 lookup.')
 
     const matches = await preloadFormularyDrugs(formularyUrl, drugs)
     const available = matches.filter((match) => match.source_available)
