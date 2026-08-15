@@ -1,0 +1,49 @@
+name: Expo Go Proof Publisher
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/expo-go-proof-publisher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: '1'
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/expo-go-webview-proof
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+      - name: Install test dependencies
+        working-directory: expo-go-test
+        run: npm install
+      - name: Start tunnel and publish URL to issue 9
+        working-directory: expo-go-test
+        run: |
+          rm -f /tmp/expo-go.log
+          npx expo start --tunnel --clear > /tmp/expo-go.log 2>&1 &
+          EXPO_PID=$!
+          URL=''
+          for i in $(seq 1 90); do
+            URL=$(grep -Eo 'exp://[^[:space:]]+' /tmp/expo-go.log | head -1 || true)
+            if [ -n "$URL" ]; then break; fi
+            if ! kill -0 "$EXPO_PID" 2>/dev/null; then cat /tmp/expo-go.log; exit 1; fi
+            sleep 2
+          done
+          if [ -z "$URL" ]; then cat /tmp/expo-go.log; exit 1; fi
+          echo "Expo Go test URL: $URL"
+          gh issue comment 9 --repo JustinMig/mayer-medicare-finder --body "EXPO_TEST_URL=$URL"
+          wait "$EXPO_PID"
