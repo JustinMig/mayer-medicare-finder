@@ -1,0 +1,32 @@
+name: Expo Go WebView Proof
+
+on:
+  push:
+    branches:
+      - agent/expo-go-webview-proof
+    paths:
+      - 'expo-go-test/**'
+      - '.github/workflows/expo-go-webview-proof.yml'
+  workflow_dispatch:
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: '1'
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    defaults:
+      run:
+        working-directory: expo-go-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+      - name: Install test dependencies
+        run: npm install
+      - name: Start Expo Go tunnel
+        run: |
+          echo 'Starting temporary Expo Go tunnel for physical-device WebView proof...'
+          timeout 1200 npx expo start --tunnel --clear
