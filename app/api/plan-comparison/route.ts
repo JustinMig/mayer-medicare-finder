@@ -82,8 +82,10 @@ function estimateFillCost(match: Q1DrugMatch, daysSupply: number, basis: Exclude
     const costShare = daysSupply === 90 ? match.mail_90_day : match.preferred_30_day
     return { cost: scaledCostShare(costShare, retail, daysSupply / 30), retail }
   }
-  if (basis === 'standard_retail') return { cost: null, retail: daysSupply === 90 ? match.retail_90_day : match.retail_30_day !== null ? match.retail_30_day * (daysSupply / 30) : null }
   const retail = daysSupply === 90 ? (match.retail_90_day ?? (match.retail_30_day !== null ? match.retail_30_day * 3 : null)) : match.retail_30_day !== null ? match.retail_30_day * (daysSupply / 30) : null
+  if (basis === 'standard_retail') {
+    return { cost: scaledCostShare(match.preferred_30_day, retail, daysSupply / 30), retail }
+  }
   return { cost: scaledCostShare(match.preferred_30_day, retail, daysSupply / 30), retail }
 }
 
@@ -124,7 +126,7 @@ async function persistDrugCache(plan: PlanRow, drug: DrugInput, match: Q1DrugMat
     const { data: catalog } = await admin.from('medicare_drug_catalog').upsert({ rxcui: drug.rxcui, drug_name: drug.name, display_name: drug.name, source: 'NLM RxNorm', updated_at: new Date().toISOString() }, { onConflict: 'rxcui' }).select('id').single()
     if (!catalog?.id) return
     await admin.from('medicare_plan_formulary').upsert({ medicare_plan_id: plan.id, drug_id: catalog.id, tier: match.tier, covered: match.covered, prior_authorization: /\bP\b|prior authorization/i.test(match.utilization_management || ''), step_therapy: /\bS\b|step therapy/i.test(match.utilization_management || ''), quantity_limit: /\bQ\b|quantity/i.test(match.utilization_management || ''), source: 'Q1Medicare formulary browser (CMS-derived reference)', source_date: new Date().toISOString().slice(0,10), updated_at: new Date().toISOString() }, { onConflict: 'medicare_plan_id,drug_id' })
-    const costText = basis === 'mail_order' ? match.mail_90_day : basis === 'preferred_retail' ? match.preferred_30_day : null
+    const costText = basis === 'mail_order' ? match.mail_90_day : match.preferred_30_day
     if (match.covered && match.tier && costText) {
       const fixed = costText.includes('$') ? numericMoney(costText) : null; const percent = costText.match(/(\d+(?:\.\d+)?)\s*%/)
       await admin.from('medicare_plan_drug_cost_shares').upsert({ medicare_plan_id: plan.id, tier: match.tier, pharmacy_type: basis, days_supply: basis === 'mail_order' ? 90 : 30, copay: fixed, coinsurance_percent: percent ? Number(percent[1]) : null, source: 'Q1Medicare formulary browser (CMS-derived reference)', source_date: new Date().toISOString().slice(0,10), updated_at: new Date().toISOString() }, { onConflict: 'medicare_plan_id,tier,pharmacy_type,days_supply' })
@@ -211,7 +213,7 @@ export async function POST(request: NextRequest) {
     medication_count: drugs.length,
     pharmacy,
     pharmacy_pricing_basis: requestedBasis,
-    estimate_note: 'Drug totals use the selected days supply and actual fill months. Preferred-retail and mail-order amounts use published plan formulary cost sharing when available. Standard-retail or unverified pharmacy-network pricing is shown as unknown instead of inventing a copay.',
+    estimate_note: 'Drug totals use the selected days supply and actual fill months. Retail pricing uses the published plan 30-day retail cost sharing when available, including standard-retail comparisons; mail-order pricing uses the published mail-order amount when available. A price is shown as unknown only when the source does not provide enough cost-sharing information to calculate it.',
     lis_note: body.medicaid && body.medicaid !== 'none' ? 'The selected Medicaid/MSP level may qualify the beneficiary for Extra Help, so actual prescription copays may be lower than the standard estimate shown.' : null
   }, { headers: { 'Cache-Control': 'private, no-store' } })
 }
