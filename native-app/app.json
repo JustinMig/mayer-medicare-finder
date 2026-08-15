@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Mayer Medicare Finder",
+    "slug": "mayer-medicare-finder",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mayerig.medicarefinder"
+    },
+    "android": {
+      "package": "com.mayerig.medicarefinder",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
