@@ -1,176 +1,57 @@
 name: CMS Compensation Audit
-
 on:
   push:
-    paths:
-      - '.github/workflows/cms-compensation-audit.yml'
+    paths: ['.github/workflows/cms-compensation-audit.yml']
   workflow_dispatch:
-
 permissions:
   contents: read
   issues: write
-
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - name: Download CMS 2026 compensation data
+      - name: Download CMS data
         run: |
-          set -euo pipefail
-          curl -fL --retry 3 -A 'Mozilla/5.0' 'https://www.cms.gov/files/zip/cy-2026-agent-broker-compensation-data.zip' -o /tmp/cms-comp.zip
-          mkdir -p /tmp/cms-comp
-          unzip -o /tmp/cms-comp.zip -d /tmp/cms-comp
-
-      - name: Install spreadsheet readers
-        run: python -m pip install --quiet pandas openpyxl xlrd
-
-      - name: Build compact report
+          curl -fL --retry 3 -A 'Mozilla/5.0' 'https://www.cms.gov/files/zip/cy-2026-agent-broker-compensation-data.zip' -o /tmp/c.zip
+          mkdir /tmp/c && unzip -oq /tmp/c.zip -d /tmp/c
+          python -m pip install --quiet pandas openpyxl xlrd
+      - name: Classify plans
         run: |
           python - <<'PY'
-          import glob, os, re, json
-          import pandas as pd
-
-          plan_keys = '''
-          H3239 005 0
-          H3239 012 0
-          H3239 014 0
-          H3239 015 0
-          H3239 017 0
-          H3239 028 0
-          H5521 218 0
-          H5521 464 0
-          H5521 465 0
-          H5521 470 0
-          H5521 477 0
-          H5521 553 0
-          H7355 001 0
-          H7355 002 0
-          H7355 003 0
-          H7355 004 0
-          H7355 006 0
-          H7355 007 0
-          H7355 009 0
-          H7355 010 0
-          H4407 004 0
-          H4407 027 0
-          H4407 029 0
-          H4407 030 1
-          H4407 030 2
-          H4407 030 3
-          H4407 034 0
-          H4513 049 4
-          H7849 135 0
-          H7849 144 0
-          H7849 153 0
-          H1036 151 0
-          H1036 222 0
-          H1036 327 0
-          H1036 328 0
-          H1036 329 0
-          H1036 330 0
-          H5216 097 0
-          H5216 136 0
-          H5216 160 0
-          H5216 292 0
-          H5216 298 0
-          H5216 300 0
-          H5216 334 0
-          H5216 367 0
-          H6622 047 0
-          H6622 048 0
-          H7617 082 0
-          H7617 083 0
-          H7617 084 0
-          H7617 085 0
-          H7617 087 0
-          R0110 003 0
-          H0710 004 0
-          H1889 011 0
-          H1889 032 0
-          H5008 011 0
-          H5008 016 0
-          H5008 017 0
-          H5253 141 0
-          H5253 183 0
-          H8768 030 0
-          H8768 034 0
-          H8768 040 0
-          '''
-          wanted = {(a,b,c) for a,b,c in (line.split() for line in plan_keys.splitlines() if line.strip())}
-          contracts = {k[0] for k in wanted}
-
+          import glob,os,pandas as pd
+          raw='''H3239 005 0\nH3239 012 0\nH3239 014 0\nH3239 015 0\nH3239 017 0\nH3239 028 0\nH5521 218 0\nH5521 464 0\nH5521 465 0\nH5521 470 0\nH5521 477 0\nH5521 553 0\nH7355 001 0\nH7355 002 0\nH7355 003 0\nH7355 004 0\nH7355 006 0\nH7355 007 0\nH7355 009 0\nH7355 010 0\nH4407 004 0\nH4407 027 0\nH4407 029 0\nH4407 030 1\nH4407 030 2\nH4407 030 3\nH4407 034 0\nH4513 049 4\nH7849 135 0\nH7849 144 0\nH7849 153 0\nH1036 151 0\nH1036 222 0\nH1036 327 0\nH1036 328 0\nH1036 329 0\nH1036 330 0\nH5216 097 0\nH5216 136 0\nH5216 160 0\nH5216 292 0\nH5216 298 0\nH5216 300 0\nH5216 334 0\nH5216 367 0\nH6622 047 0\nH6622 048 0\nH7617 082 0\nH7617 083 0\nH7617 084 0\nH7617 085 0\nH7617 087 0\nR0110 003 0\nH0710 004 0\nH1889 011 0\nH1889 032 0\nH5008 011 0\nH5008 016 0\nH5008 017 0\nH5253 141 0\nH5253 183 0\nH8768 030 0\nH8768 034 0\nH8768 040 0'''
+          wanted=[tuple(x.split()) for x in raw.splitlines()]
           frames=[]
-          for p in glob.glob('/tmp/cms-comp/**/*', recursive=True):
-              if not os.path.isfile(p): continue
-              low=p.lower()
-              try:
-                  if low.endswith('.csv'):
-                      df=pd.read_csv(p,dtype=str,keep_default_na=False,encoding_errors='replace')
-                  elif low.endswith(('.xlsx','.xls')):
-                      df=pd.read_excel(p,dtype=str,keep_default_na=False)
-                  elif low.endswith('.txt'):
-                      df=pd.read_csv(p,dtype=str,keep_default_na=False,sep=None,engine='python',encoding_errors='replace')
-                  else: continue
-                  df['_source_file']=os.path.basename(p)
-                  frames.append(df)
-              except Exception as e:
-                  print('READ_ERROR',p,repr(e))
-          if not frames: raise SystemExit('No readable CMS data file')
-          data=pd.concat(frames,ignore_index=True,sort=False).fillna('')
-          cols=list(data.columns)
-
-          def norm(v): return re.sub(r'[^a-z0-9]+',' ',str(v).lower()).strip()
-          important=[c for c in cols if re.search(r'contract|plan|pbp|segment|state|agent|broker|comp|commission|initial|renew|independent|payment', norm(c), re.I)]
-          if '_source_file' not in important: important.append('_source_file')
-
-          # Keep rows mentioning one of our exact contract IDs. Then require MS when an explicit state column exists.
-          contract_mask=data.astype(str).apply(lambda col: col.str.upper().isin(contracts)).any(axis=1)
-          subset=data[contract_mask].copy()
-          state_cols=[c for c in cols if re.search(r'(^| )(state|st)( |$)', norm(c))]
-          if state_cols:
-              smask=False
-              for c in state_cols:
-                  vals=subset[c].astype(str).str.strip().str.upper()
-                  smask=smask | vals.isin(['MS','MISSISSIPPI'])
-              if smask.any(): subset=subset[smask].copy()
-
-          # Retain only rows that also mention a plan number from our list for that contract.
-          rows=[]
-          for rec in subset.to_dict(orient='records'):
-              vals=[str(v).strip() for v in rec.values()]
-              upper={v.upper() for v in vals}
-              cands=[c for c in contracts if c in upper]
-              if not cands: continue
-              contract=cands[0]
-              plan_nums={b for a,b,s in wanted if a==contract}
-              # Match padded or integer-style plan numbers.
-              plan_hit=None
-              for pnum in plan_nums:
-                  forms={pnum,str(int(pnum))}
-                  if any(v in forms for v in vals): plan_hit=pnum; break
-              if not plan_hit: continue
-              slim={str(k):str(rec.get(k,'')) for k in important}
-              rows.append(slim)
-
-          body=[]
-          body.append('# CMS 2026 Mississippi compensation audit')
-          body.append('')
-          body.append('**Relevant columns:** `'+ '`, `'.join(map(str,important)) +'`')
-          body.append('')
-          body.append(f'**Matched CMS rows for our contracts/plans:** {len(rows)}')
-          body.append('')
-          for r in rows:
-              body.append('```json')
-              body.append(json.dumps(r,ensure_ascii=False,separators=(',',':')))
-              body.append('```')
-          text='\n'.join(body)
-          if len(text)>60000:
-              text=text[:59500]+'\n\n_Report truncated at GitHub issue size limit._'
-          open('/tmp/report.md','w').write(text)
-          print(text)
+          for p in glob.glob('/tmp/c/**/*',recursive=True):
+            if not os.path.isfile(p): continue
+            try:
+              if p.lower().endswith('.xlsx'): d=pd.read_excel(p,dtype=str,keep_default_na=False)
+              elif p.lower().endswith('.xls'): d=pd.read_excel(p,dtype=str,keep_default_na=False)
+              elif p.lower().endswith('.csv'): d=pd.read_csv(p,dtype=str,keep_default_na=False)
+              else: continue
+              frames.append(d)
+            except: pass
+          d=pd.concat(frames,ignore_index=True).fillna('')
+          def n(v):
+            try:return str(int(float(str(v).strip())))
+            except:return str(v).strip()
+          out=[]
+          for c,p,s in wanted:
+            m=d[(d['State Code'].astype(str).str.upper()=='MS') & (d['Contract ID'].astype(str).str.upper()==c) & (d['Plan ID'].map(n)==str(int(p))) & (d['Segment ID'].map(n)==str(int(s)))]
+            if m.empty:
+              status='UNMATCHED'; indep=''; high=''
+            else:
+              indep='Y' if (m['Used Independent Agents?'].astype(str).str.upper()=='Y').any() else 'N'
+              vals=pd.to_numeric(m['Initial Compensation High'],errors='coerce').fillna(0)
+              high=str(float(vals.max()))
+              status='COMMISSIONABLE' if indep=='Y' and vals.max()>0 else 'NON_COMMISSIONABLE'
+            out.append((c,p,s,status,indep,high))
+          lines=['# CMS 2026 exact plan compensation classification','', '| Contract | Plan | Segment | Status | Independent agents | Initial comp high |','|---|---:|---:|---|---|---:|']
+          for r in out: lines.append('| '+' | '.join(r)+' |')
+          lines += ['',f'Commissionable: {sum(r[3]=="COMMISSIONABLE" for r in out)}',f'Non-commissionable: {sum(r[3]=="NON_COMMISSIONABLE" for r in out)}',f'Unmatched: {sum(r[3]=="UNMATCHED" for r in out)}']
+          open('/tmp/report.md','w').write('\n'.join(lines))
           PY
-
-      - name: Publish report issue
+      - name: Publish classification
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "CMS 2026 Compensation Audit Report" --body-file /tmp/report.md
+        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "CMS 2026 Exact Compensation Classification" --body-file /tmp/report.md
