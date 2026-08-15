@@ -71,7 +71,18 @@ function browseUrl(formularyUrl: string, letter: string) {
 
 async function fetchPage(url: string) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 12000)
-  try { const response = await fetch(url, { headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'MayerMedicareFinder/1.0 formulary-cache' }, signal: controller.signal, next: { revalidate: 60 * 60 * 24 * 7 } }); return response.ok ? await response.text() : null }
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'
+      },
+      signal: controller.signal,
+      cache: 'no-store'
+    })
+    return response.ok ? await response.text() : null
+  }
   catch { return null } finally { clearTimeout(timer) }
 }
 
