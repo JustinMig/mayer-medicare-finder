@@ -35,7 +35,7 @@ export default async function MedicareFinderHome() {
       <main className="medicare-standalone-content">
         <div className="clients-page-heading medicare-page-heading">
           <h1>Medicare Plan Finder</h1>
-          <p className="subtle">Compare Mississippi Medicare Advantage plans by medical benefits, allowances, and in-network doctors.</p>
+          <p className="subtle">Compare Mississippi Medicare Advantage plans by medical benefits, allowances, and verified in-network doctors.</p>
         </div>
         <FinderVisualEnhancer />
         <MedicarePlanFinderLean />
