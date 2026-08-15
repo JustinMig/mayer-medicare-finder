@@ -90,22 +90,17 @@ export default function MedicareWorkspace({ children }: { children: ReactNode })
               background: '#fffefa',
             }}
           >
-            <strong>Medicare.gov</strong>
-            <a
-              className="btn btn-secondary"
-              href="https://www.medicare.gov/plan-compare/"
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              Open in new tab
-            </a>
+            <strong>Medicare.gov Plan Compare</strong>
+            <span className="subtle" style={{ fontSize: 12 }}>
+              Public Medicare.gov view inside Mayer Medicare Finder
+            </span>
           </div>
 
           {hasOpenedMedicare ? (
             <iframe
               title="Medicare.gov Plan Compare"
-              src="https://www.medicare.gov/plan-compare/"
-              referrerPolicy="strict-origin-when-cross-origin"
+              src="/medicare-gov-proxy/plan-compare/"
+              referrerPolicy="same-origin"
               style={{
                 display: 'block',
                 width: '100%',
@@ -118,7 +113,7 @@ export default function MedicareWorkspace({ children }: { children: ReactNode })
           ) : null}
         </div>
         <p className="subtle" style={{ marginTop: 10, fontSize: 13 }}>
-          Medicare.gov is operated by CMS. If CMS blocks embedded viewing in your browser, use “Open in new tab.”
+          Medicare.gov is operated by CMS. This embedded workspace is limited to the public Plan Compare experience; secure Medicare account sign-in is not routed through Mayer Insurance Group.
         </p>
       </section>
     </>
