@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 const MEDICAID_LEVELS = new Set(['none', 'qmb', 'slmb', 'qi', 'fbde', 'other'])
+const PART_B_STANDARD_PREMIUM_2026 = 202.90
+const PART_D_OOP_CAP_2026 = 2100
 
 type BenefitDetails = Record<string, unknown>
 
@@ -22,6 +24,12 @@ type MedicarePlanRow = {
   pcp_copay: string | null
   specialist_copay: string | null
   inpatient_hospital: string | null
+  ambulance_copay: string | null
+  emergency_room_copay: string | null
+  urgent_care_copay: string | null
+  drug_deductible: string | null
+  drug_oop_cap: string | null
+  drug_benefit_notes: string | null
   otc_benefit: string | null
   food_benefit: string | null
   dental_benefit: string | null
@@ -33,6 +41,8 @@ type MedicarePlanRow = {
   cms_source_date: string | null
   q1_source_url: string | null
   source_note: string | null
+  structured_benefits_source: string | null
+  structured_benefits_verified_at: string | null
 }
 
 type CountyJoinRow = {
@@ -54,9 +64,18 @@ function detailString(details: BenefitDetails | null, key: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function moneyString(value: string) {
-  const numeric = Number(value.replace(/[$,\s]/g, ''))
-  if (!Number.isFinite(numeric)) return value.trim()
+function summaryLines(details: BenefitDetails | null) {
+  const lines = details?.q1_summary_lines
+  return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === 'string') : []
+}
+
+function summaryLine(details: BenefitDetails | null, pattern: RegExp) {
+  return summaryLines(details).find((line) => pattern.test(line))?.replace(/^\s*[•*-]\s*/, '').trim() || null
+}
+
+function moneyString(value: string | number) {
+  const numeric = typeof value === 'number' ? value : Number(value.replace(/[$,\s]/g, ''))
+  if (!Number.isFinite(numeric)) return String(value).trim()
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -65,66 +84,55 @@ function moneyString(value: string) {
   }).format(numeric)
 }
 
+function numericMoney(value: string | null | undefined) {
+  if (!value) return null
+  const match = value.replace(/,/g, '').match(/\$?(-?\d+(?:\.\d+)?)/)
+  const amount = Number(match?.[1])
+  return Number.isFinite(amount) ? amount : null
+}
+
 function annualAllowanceFromText(value: string | null) {
   if (!value || /not covered/i.test(value)) return null
-
   const candidates: number[] = []
   const patterns = [
     /maximum benefit:\s*\$([\d,]+(?:\.\d{1,2})?)(?=[^·]*(?:every year|per year|annually|annual))/gi,
     /(?:allowance|benefit)[^$]{0,80}\$([\d,]+(?:\.\d{1,2})?)[^·]{0,80}(?:every year|per year|annually|annual)/gi,
     /\$([\d,]+(?:\.\d{1,2})?)\s*(?:every year|per year|annually|annual)/gi
   ]
-
   for (const pattern of patterns) {
     for (const match of value.matchAll(pattern)) {
       const amount = Number(match[1].replace(/,/g, ''))
       if (Number.isFinite(amount) && amount >= 0) candidates.push(amount)
     }
   }
-
   if (!candidates.length) return null
-  const highest = Math.max(...candidates)
-  return `${moneyString(String(highest))} / year`
+  return `${moneyString(Math.max(...candidates))} / year`
 }
 
 function recurringAllowanceFromText(value: string | null) {
   if (!value || /not covered|dollar amount not published|verify carrier/i.test(value)) return null
-
   const match = value.match(/\$([\d,]+(?:\.\d{1,2})?)[^·]{0,60}\b(month|monthly|quarter|quarterly|year|yearly|annual|annually)\b/i)
   if (!match) return null
-
   const frequency = match[2].toLowerCase()
-  const normalizedFrequency = frequency.startsWith('month')
-    ? 'month'
-    : frequency.startsWith('quarter')
-      ? 'quarter'
-      : 'year'
-
+  const normalizedFrequency = frequency.startsWith('month') ? 'month' : frequency.startsWith('quarter') ? 'quarter' : 'year'
   return `${moneyString(match[1])} / ${normalizedFrequency}`
 }
 
 function recurringAllowance(details: BenefitDetails | null, prefix: 'otc' | 'food', fallback: string | null) {
   const amount = detailString(details, `${prefix}_amount`)
   const frequency = detailString(details, `${prefix}_frequency`)
-
   if (amount) {
     const normalizedAmount = moneyString(amount)
     if (!frequency) return normalizedAmount
     const cleanedFrequency = frequency.replace(/^\s*per\s+/i, '').trim().toLowerCase()
     return `${normalizedAmount} / ${cleanedFrequency}`
   }
-
   return recurringAllowanceFromText(fallback)
 }
 
-
 function benefitSegment(value: string | null, label: string) {
   if (!value) return null
-  const segment = value
-    .split(/\s*·\s*/g)
-    .map((part) => part.trim())
-    .find((part) => part.toLowerCase().startsWith(`${label.toLowerCase()}:`))
-
+  const segment = value.split(/\s*·\s*/g).map((part) => part.trim()).find((part) => part.toLowerCase().startsWith(`${label.toLowerCase()}:`))
   if (!segment) return null
   const cleaned = segment.slice(segment.indexOf(':') + 1).trim()
   return cleaned || null
@@ -161,21 +169,12 @@ function partBGiveback(details: BenefitDetails | null) {
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: claimsData } = await supabase.auth.getClaims()
-
-  if (!claimsData?.claims) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!claimsData?.claims) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const county = (request.nextUrl.searchParams.get('county') || '').trim().replace(/\s+county$/i, '').slice(0, 80)
   const medicaid = (request.nextUrl.searchParams.get('medicaid') || 'none').trim().toLowerCase()
-
-  if (!county) {
-    return NextResponse.json({ error: 'County is required' }, { status: 400 })
-  }
-
-  if (!MEDICAID_LEVELS.has(medicaid)) {
-    return NextResponse.json({ error: 'Invalid Medicaid level' }, { status: 400 })
-  }
+  if (!county) return NextResponse.json({ error: 'County is required' }, { status: 400 })
+  if (!MEDICAID_LEVELS.has(medicaid)) return NextResponse.json({ error: 'Invalid Medicaid level' }, { status: 400 })
 
   const { data, error } = await supabase
     .from('medicare_plan_counties')
@@ -185,25 +184,22 @@ export async function GET(request: NextRequest) {
         id, carrier, plan_name, contract_id, plan_id, segment_id, plan_type,
         snp_indicator, snp_type, dsnp_integration_status, zero_dollar_cost_sharing_dsnp,
         monthly_premium, moop_in_network, pcp_copay, specialist_copay,
-        inpatient_hospital, otc_benefit, food_benefit, dental_benefit,
+        inpatient_hospital, ambulance_copay, emergency_room_copay, urgent_care_copay,
+        drug_deductible, drug_oop_cap, drug_benefit_notes,
+        otc_benefit, food_benefit, dental_benefit,
         vision_benefit, hearing_benefit, medicaid_levels, medicaid_level_status,
-        benefit_details, cms_source_date, q1_source_url, source_note
+        benefit_details, cms_source_date, q1_source_url, source_note,
+        structured_benefits_source, structured_benefits_verified_at
       )
     `)
     .eq('state', 'MS')
     .ilike('county_name', county)
     .order('county_name')
 
-  if (error) {
-    return NextResponse.json({ error: 'Unable to load Medicare plans' }, { status: 500 })
-  }
+  if (error) return NextResponse.json({ error: 'Unable to load Medicare plans' }, { status: 500 })
 
-  const exactRows = ((data || []) as unknown as CountyJoinRow[])
-    .filter((row) => row.county_name.toLowerCase() === county.toLowerCase())
-
-  let plans = exactRows
-    .map((row) => normalizedPlan(row.medicare_plans))
-    .filter((plan): plan is MedicarePlanRow => Boolean(plan))
+  const exactRows = ((data || []) as unknown as CountyJoinRow[]).filter((row) => row.county_name.toLowerCase() === county.toLowerCase())
+  let plans = exactRows.map((row) => normalizedPlan(row.medicare_plans)).filter((plan): plan is MedicarePlanRow => Boolean(plan))
 
   if (medicaid === 'none') {
     plans = plans.filter((plan) => !isDsnp(plan))
@@ -233,13 +229,18 @@ export async function GET(request: NextRequest) {
     const hearingAids = benefitSegment(plan.hearing_benefit, 'Hearing aids')
     const otcAllowance = recurringAllowance(details, 'otc', plan.otc_benefit)
     const foodAllowance = recurringAllowance(details, 'food', plan.food_benefit)
+    const partBCredit = partBGiveback(details)
+    const givebackAmount = numericMoney(partBCredit)
+    const netPartB = Math.max(0, PART_B_STANDARD_PREMIUM_2026 - (givebackAmount || 0))
 
     return {
       ...plan,
       benefit_details: undefined,
       plan_key: `${plan.contract_id}-${plan.plan_id}${plan.segment_id && plan.segment_id !== '0' ? `-${plan.segment_id}` : ''}`,
       is_dsnp: isDsnp(plan),
-      part_b_credit: partBGiveback(details),
+      part_b_standard_premium: `${moneyString(PART_B_STANDARD_PREMIUM_2026)} / month`,
+      part_b_credit: partBCredit,
+      part_b_net_standard_cost: `${moneyString(netPartB)} / month`,
       dental_annual_allowance: dentalAnnualAllowance,
       vision_annual_allowance: visionAnnualAllowance,
       vision_exam: visionExam,
@@ -250,6 +251,11 @@ export async function GET(request: NextRequest) {
       hearing_summary: compactHearingSummary(hearingExam, hearingAids),
       otc_allowance: otcAllowance,
       food_allowance: foodAllowance,
+      ambulance_copay: plan.ambulance_copay || summaryLine(details, /ambulance/i),
+      emergency_room_copay: plan.emergency_room_copay || summaryLine(details, /emergency room|emergency care/i),
+      urgent_care_copay: plan.urgent_care_copay || summaryLine(details, /urgent care/i),
+      drug_deductible: plan.drug_deductible || detailString(details, 'drug_deductible'),
+      drug_oop_cap: plan.drug_oop_cap || `${moneyString(PART_D_OOP_CAP_2026)} / year for covered Part D drugs`,
       medicaid_match_status: !isDsnp(plan)
         ? 'not_required'
         : plan.medicaid_level_status === 'verified'
@@ -260,19 +266,16 @@ export async function GET(request: NextRequest) {
     }
   })
 
-  return NextResponse.json(
-    {
-      county: exactRows[0]?.county_name || county,
-      medicaid,
-      plan_year: 2026,
-      results,
-      count: results.length,
-      cms_source_date: results.find((plan) => plan.cms_source_date)?.cms_source_date || '2026-08-10'
-    },
-    {
-      headers: {
-        'Cache-Control': 'private, max-age=120, stale-while-revalidate=600'
-      }
-    }
-  )
+  return NextResponse.json({
+    county: exactRows[0]?.county_name || county,
+    medicaid,
+    plan_year: 2026,
+    results,
+    count: results.length,
+    cms_source_date: results.find((plan) => plan.cms_source_date)?.cms_source_date || '2026-08-10',
+    part_b_standard_premium_2026: PART_B_STANDARD_PREMIUM_2026,
+    part_d_oop_cap_2026: PART_D_OOP_CAP_2026
+  }, {
+    headers: { 'Cache-Control': 'private, max-age=120, stale-while-revalidate=600' }
+  })
 }
