@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const ALLOWED_RADII = new Set([5, 10, 25, 50, 100])
 const NPPES_URL = 'https://npiregistry.cms.hhs.gov/api/'
 const ZIP_API_BASE = 'https://api.zippopotam.us/us/'
+const ZIP_LOOKUP_CONCURRENCY = 8
 
 const zipCoordinateCache = new Map<string, { lat: number; lon: number } | null>()
 
@@ -52,6 +54,14 @@ type ProviderCandidate = {
   postal_code: string
 }
 
+type Coordinates = { lat: number; lon: number }
+
+type ZipCoordinateRow = {
+  zip_code: string
+  lat: number
+  lon: number
+}
+
 function cleanZip(value: string) {
   const match = value.trim().match(/^([0-9]{5})/)
   return match?.[1] || ''
@@ -73,18 +83,35 @@ function makeLocationKey(npi: string, address: string, city: string, zip: string
   return [npi, normalizeLocationPart(address), normalizeLocationPart(city), zip].join('|')
 }
 
-async function coordinatesForZip(zip: string) {
-  if (zipCoordinateCache.has(zip)) return zipCoordinateCache.get(zip) || null
+async function settleWithConcurrency<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>) {
+  const results = new Array<PromiseSettledResult<R>>(items.length)
+  let cursor = 0
 
+  async function runner() {
+    while (true) {
+      const index = cursor
+      cursor += 1
+      if (index >= items.length) return
+      try {
+        results[index] = { status: 'fulfilled', value: await worker(items[index]) }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  const runnerCount = Math.min(Math.max(1, limit), items.length)
+  await Promise.all(Array.from({ length: runnerCount }, () => runner()))
+  return results
+}
+
+async function fetchCoordinatesFromZipApi(zip: string): Promise<Coordinates | null> {
   try {
     const response = await fetch(`${ZIP_API_BASE}${encodeURIComponent(zip)}`, {
       headers: { Accept: 'application/json' },
       next: { revalidate: 60 * 60 * 24 * 30 }
     })
-    if (!response.ok) {
-      zipCoordinateCache.set(zip, null)
-      return null
-    }
+    if (!response.ok) return null
 
     const payload = await response.json() as {
       places?: Array<{ latitude?: string; longitude?: string }>
@@ -92,16 +119,81 @@ async function coordinatesForZip(zip: string) {
     const place = payload.places?.[0]
     const lat = Number(place?.latitude)
     const lon = Number(place?.longitude)
-    const coordinates = Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null
-    zipCoordinateCache.set(zip, coordinates)
-    return coordinates
+    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null
   } catch {
-    zipCoordinateCache.set(zip, null)
     return null
   }
 }
 
-function haversineMiles(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
+async function coordinatesForZips(
+  zipCodes: string[],
+  supabase: Awaited<ReturnType<typeof createClient>>
+) {
+  const uniqueZips = [...new Set(zipCodes.map(cleanZip).filter((zip) => /^\d{5}$/.test(zip)))]
+  const result = new Map<string, Coordinates | null>()
+  const unresolved: string[] = []
+
+  for (const zip of uniqueZips) {
+    if (zipCoordinateCache.has(zip)) result.set(zip, zipCoordinateCache.get(zip) || null)
+    else unresolved.push(zip)
+  }
+
+  if (unresolved.length) {
+    const { data } = await supabase
+      .from('zip_coordinates')
+      .select('zip_code, lat, lon')
+      .in('zip_code', unresolved)
+
+    for (const row of (data || []) as ZipCoordinateRow[]) {
+      const coordinates = { lat: Number(row.lat), lon: Number(row.lon) }
+      if (!Number.isFinite(coordinates.lat) || !Number.isFinite(coordinates.lon)) continue
+      zipCoordinateCache.set(row.zip_code, coordinates)
+      result.set(row.zip_code, coordinates)
+    }
+  }
+
+  const misses = unresolved.filter((zip) => !result.has(zip))
+  if (misses.length) {
+    const fetched = await settleWithConcurrency(misses, ZIP_LOOKUP_CONCURRENCY, async (zip) => ({
+      zip,
+      coordinates: await fetchCoordinatesFromZipApi(zip)
+    }))
+
+    const rowsToPersist: Array<{ zip_code: string; lat: number; lon: number; source: string; updated_at: string }> = []
+    const updatedAt = new Date().toISOString()
+
+    for (const settled of fetched) {
+      if (settled.status !== 'fulfilled') continue
+      const { zip, coordinates } = settled.value
+      zipCoordinateCache.set(zip, coordinates)
+      result.set(zip, coordinates)
+      if (coordinates) {
+        rowsToPersist.push({
+          zip_code: zip,
+          lat: coordinates.lat,
+          lon: coordinates.lon,
+          source: 'zippopotam.us',
+          updated_at: updatedAt
+        })
+      }
+    }
+
+    if (rowsToPersist.length) {
+      try {
+        const admin = createAdminClient()
+        await admin
+          .from('zip_coordinates')
+          .upsert(rowsToPersist, { onConflict: 'zip_code' })
+      } catch {
+        // The search still succeeds even if the server-side cache cannot be updated.
+      }
+    }
+  }
+
+  return result
+}
+
+function haversineMiles(a: Coordinates, b: Coordinates) {
   const earthRadiusMiles = 3958.7613
   const toRadians = (degrees: number) => degrees * Math.PI / 180
   const dLat = toRadians(b.lat - a.lat)
@@ -200,8 +292,6 @@ async function searchNppes(query: string) {
     requests.map(async (params) => {
       const response = await fetch(`${NPPES_URL}?${params.toString()}`, {
         headers: { Accept: 'application/json' },
-        // NPPES is refreshed daily. A short server-side cache keeps autocomplete fast
-        // and avoids repeating the same public CMS request for every keystroke/session.
         next: { revalidate: 60 * 60 * 6 }
       })
       if (!response.ok) throw new Error(`NPPES ${response.status}`)
@@ -232,18 +322,14 @@ export async function GET(request: NextRequest) {
   if (!/^\d{5}$/.test(zip)) return NextResponse.json({ error: 'Enter a valid 5-digit ZIP code.' }, { status: 400 })
   if (!ALLOWED_RADII.has(radius)) return NextResponse.json({ error: 'Choose a valid search radius.' }, { status: 400 })
 
-  const center = await coordinatesForZip(zip)
-  if (!center) return NextResponse.json({ error: 'ZIP code could not be located.' }, { status: 400 })
-
   try {
     const nppesResults = await searchNppes(query)
     const rawCandidates = nppesResults.flatMap(candidatesFromResult)
-
     const uniqueZipCodes = [...new Set(rawCandidates.map((candidate) => candidate.postal_code))].slice(0, 120)
-    const coordinates = new Map<string, { lat: number; lon: number } | null>()
-    await Promise.all(uniqueZipCodes.map(async (candidateZip) => {
-      coordinates.set(candidateZip, candidateZip === zip ? center : await coordinatesForZip(candidateZip))
-    }))
+    const coordinates = await coordinatesForZips([zip, ...uniqueZipCodes], supabase)
+    const center = coordinates.get(zip)
+
+    if (!center) return NextResponse.json({ error: 'ZIP code could not be located.' }, { status: 400 })
 
     const uniqueLocations = new Map<string, ProviderCandidate & { distance_miles: number }>()
     for (const candidate of rawCandidates) {
@@ -270,7 +356,7 @@ export async function GET(request: NextRequest) {
       results,
       count: results.length,
       source: 'CMS NPPES NPI Registry API 2.1',
-      location_method: 'ZIP centroid distance',
+      location_method: 'ZIP centroid distance (Supabase cached)',
       multiple_locations_preserved: true
     }, {
       headers: {
