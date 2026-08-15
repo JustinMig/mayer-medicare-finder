@@ -10,10 +10,29 @@ import { createClient } from '@/lib/supabase/server'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export default async function MedicareFinderHome() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}
+
+export default async function MedicareFinderHome({ searchParams }: PageProps) {
   const supabase = await createClient()
   const { data } = await supabase.auth.getClaims()
   if (!data?.claims) redirect('/login')
+
+  const params = searchParams ? await searchParams : {}
+  const appShell = params.appShell === '1'
+
+  const finder = (
+    <>
+      <div className="clients-page-heading medicare-page-heading">
+        <h1>Medicare Plan Finder</h1>
+        <p className="subtle">Compare Mississippi Medicare Advantage plans by benefits, doctors, pharmacy, medications, and estimated monthly and annual costs.</p>
+      </div>
+      <FormularyPreloader />
+      <FinderVisualEnhancer />
+      <MedicarePlanFinderProV2 />
+    </>
+  )
 
   return (
     <div className="medicare-standalone-shell">
@@ -34,15 +53,7 @@ export default async function MedicareFinderHome() {
       </header>
 
       <main className="medicare-standalone-content">
-        <MedicareWorkspace>
-          <div className="clients-page-heading medicare-page-heading">
-            <h1>Medicare Plan Finder</h1>
-            <p className="subtle">Compare Mississippi Medicare Advantage plans by benefits, doctors, pharmacy, medications, and estimated monthly and annual costs.</p>
-          </div>
-          <FormularyPreloader />
-          <FinderVisualEnhancer />
-          <MedicarePlanFinderProV2 />
-        </MedicareWorkspace>
+        {appShell ? finder : <MedicareWorkspace>{finder}</MedicareWorkspace>}
       </main>
     </div>
   )
