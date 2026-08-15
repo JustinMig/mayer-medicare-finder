@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "Mayer Medicare WebView Test",
+    "slug": "mayer-medicare-webview-proof",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light"
+  }
+}
