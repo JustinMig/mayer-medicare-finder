@@ -1,0 +1,13 @@
+/* Distinct, light backgrounds make individual plan cards easier to scan without adding runtime work. */
+div[class*="planGrid"] > article:nth-child(8n + 1) { background: #eef7ff !important; }
+div[class*="planGrid"] > article:nth-child(8n + 2) { background: #f2fbf4 !important; }
+div[class*="planGrid"] > article:nth-child(8n + 3) { background: #fff8e8 !important; }
+div[class*="planGrid"] > article:nth-child(8n + 4) { background: #f8f1ff !important; }
+div[class*="planGrid"] > article:nth-child(8n + 5) { background: #fff1f4 !important; }
+div[class*="planGrid"] > article:nth-child(8n + 6) { background: #eefbf9 !important; }
+div[class*="planGrid"] > article:nth-child(8n + 7) { background: #f7f7ee !important; }
+div[class*="planGrid"] > article:nth-child(8n + 8) { background: #f1f4ff !important; }
+
+/* Keep cards readable and preserve the existing selected-plan treatment. */
+div[class*="planGrid"] > article { transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease; }
+div[class*="planGrid"] > article:hover { transform: translateY(-1px); }
