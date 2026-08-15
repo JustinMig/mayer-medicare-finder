@@ -1,3 +1,4 @@
+// Lean Finder entry: plans, doctors, and medical benefits only.
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import MedicarePlanFinderLean from './MedicarePlanFinderLean'
