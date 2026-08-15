@@ -102,29 +102,81 @@ async function fetchQ1(url: string) {
   }
 }
 
-function findFormularyUrl(html: string) {
+function findFormularyUrls(html: string) {
+  const urls: string[] = []
   for (const match of html.matchAll(/href\s*=\s*["']([^"']*PartD-BrowseMedicare-2026PlanFormulary\.php[^"']*)["']/gi)) {
     const url = absoluteQ1Url(match[1])
-    if (url) return url
+    if (url && !urls.includes(url)) urls.push(url)
   }
   for (const match of html.matchAll(/href\s*=\s*["']([^"']*MedicareAdvantage-2026MAPDPlanRxCostSharingDetails\.php[^"']*)["']/gi)) {
     const url = absoluteQ1Url(match[1])
-    if (url) return url
+    if (url && !urls.includes(url)) urls.push(url)
   }
-  return null
+  return urls
+}
+
+function findFormularyUrl(html: string) {
+  return findFormularyUrls(html)[0] || null
+}
+
+function sourcePlanIdentity(sourceUrl: string) {
+  try {
+    const url = new URL(sourceUrl)
+    return {
+      contractId: url.searchParams.get('contractId')?.trim().toUpperCase() || null,
+      planId: url.searchParams.get('planId')?.trim() || null,
+      state: url.searchParams.get('state')?.trim().toUpperCase() || null
+    }
+  } catch {
+    return { contractId: null, planId: null, state: null }
+  }
+}
+
+export async function fetchQ1FormularyUrlByPlanId(contractId: string, planId: string, stateCode = 'MS') {
+  const contract = contractId.trim().toUpperCase()
+  const plan = planId.trim().padStart(3, '0')
+  if (!/^[A-Z]\d{4}$/.test(contract) || !/^\d{3}$/.test(plan)) return null
+
+  const lookup = new URL('https://q1medicare.com/PartD-2026-MedicarePlanIDSearchPDPMAPD.php')
+  lookup.searchParams.set('contractId', contract)
+  lookup.searchParams.set('planId', plan)
+  const html = await fetchQ1(lookup.toString())
+  if (!html) return null
+
+  const urls = findFormularyUrls(html)
+  if (!urls.length) return null
+  const wantedState = stateCode.trim().toUpperCase()
+  const stateMatch = urls.find((value) => {
+    try {
+      const url = new URL(value)
+      const stateReg = url.searchParams.get('stateReg')?.toUpperCase() || ''
+      const state = url.searchParams.get('state')?.toUpperCase() || ''
+      return state === wantedState || stateReg.endsWith(wantedState)
+    } catch {
+      return false
+    }
+  })
+  return stateMatch || urls[0]
 }
 
 export async function fetchQ1PlanDetails(sourceUrl: string): Promise<Q1PlanDetails | null> {
   const html = await fetchQ1(sourceUrl)
   if (!html) return null
   const rows = tableRows(html)
+  let formularyUrl = findFormularyUrl(html)
+  if (!formularyUrl) {
+    const identity = sourcePlanIdentity(sourceUrl)
+    if (identity.contractId && identity.planId) {
+      formularyUrl = await fetchQ1FormularyUrlByPlanId(identity.contractId, identity.planId, identity.state || 'MS')
+    }
+  }
   return {
     ambulance_copay: rowValue(rows, /^(ground\s+)?ambulance/i),
     emergency_room_copay: rowValue(rows, /emergency (room|care)/i),
     urgent_care_copay: rowValue(rows, /urgent care/i),
     drug_deductible: rowValue(rows, /annual rx deductible|drug plan deductible|drug deductible/i),
     part_b_credit: rowValue(rows, /part b (premium )?(reduction|rebate|giveback)/i),
-    formulary_url: findFormularyUrl(html)
+    formulary_url: formularyUrl
   }
 }
 
