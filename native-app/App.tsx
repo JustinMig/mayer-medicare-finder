@@ -12,7 +12,7 @@ import { WebView, type WebViewNavigation } from 'react-native-webview'
 
 type ViewName = 'finder' | 'medicare'
 
-const FINDER_URL = 'https://medicare.mayerig.com'
+const FINDER_URL = 'https://medicare.mayerig.com/?appShell=1'
 const MEDICARE_LOGIN_URL = 'https://www.medicare.gov/account/login'
 
 export default function App() {
