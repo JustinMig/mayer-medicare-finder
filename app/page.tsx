@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import MedicarePlanFinderProV2 from './MedicarePlanFinderProV2'
+import FormularyPreloader from './FormularyPreloader'
+import FinderVisualEnhancer from './FinderVisualEnhancer'
+import './finder-polish.css'
 import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +37,8 @@ export default async function MedicareFinderHome() {
           <h1>Medicare Plan Finder</h1>
           <p className="subtle">Compare Mississippi Medicare Advantage plans by benefits, doctors, pharmacy, medications, and estimated monthly and annual costs.</p>
         </div>
+        <FormularyPreloader />
+        <FinderVisualEnhancer />
         <MedicarePlanFinderProV2 />
       </main>
     </div>
