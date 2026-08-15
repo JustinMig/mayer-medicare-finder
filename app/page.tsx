@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import MedicarePlanFinderLean from './MedicarePlanFinderLean'
 import FinderVisualEnhancer from './FinderVisualEnhancer'
 import './finder-polish.css'
+import './plan-card-colors.css'
 import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
