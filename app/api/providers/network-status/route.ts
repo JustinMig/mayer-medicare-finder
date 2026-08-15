@@ -13,7 +13,6 @@ import {
 export const maxDuration = 60
 
 type SelectedDoctor = NetworkDoctor
-
 type PlanRow = NetworkPlan
 
 type ProviderRow = {
@@ -50,6 +49,18 @@ type DoctorMatch = {
   verified_at: string | null
   message: string | null
   verification_method: 'cache' | 'live' | 'unavailable'
+}
+
+type LiveCheck = {
+  doctor: SelectedDoctor
+  plan: PlanRow
+  key: string
+}
+
+type LivePersistItem = {
+  doctor: SelectedDoctor
+  plan: PlanRow
+  result: LiveNetworkResult
 }
 
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
@@ -98,6 +109,16 @@ function canonicalStreet(value: string | null | undefined) {
     .replace(/[^A-Z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function doctorCarrierKey(carrier: string, doctor: SelectedDoctor) {
+  return [
+    carrier,
+    doctor.npi,
+    canonicalStreet(doctor.address),
+    doctor.city.trim().toUpperCase(),
+    cleanZip(doctor.postal_code)
+  ].join('|')
 }
 
 function sameSelectedLocation(provider: ProviderRow, doctor: SelectedDoctor) {
@@ -159,69 +180,88 @@ function liveMatch(doctor: SelectedDoctor, result: LiveNetworkResult): DoctorMat
   }
 }
 
-async function persistLiveResult(doctor: SelectedDoctor, plan: PlanRow, result: LiveNetworkResult) {
-  if (!['in_network', 'out_of_network'].includes(result.status) || !result.verified_at) return
+async function persistLiveResults(items: LivePersistItem[]) {
+  const verified = items.filter(({ result }) =>
+    (result.status === 'in_network' || result.status === 'out_of_network') && Boolean(result.verified_at)
+  )
+  if (!verified.length) return
 
   try {
     const admin = createAdminClient()
+    const pairMap = new Map<string, { carrier: string; doctor: SelectedDoctor; result: LiveNetworkResult }>()
+
+    for (const item of verified) {
+      const pairKey = doctorCarrierKey(item.plan.carrier, item.doctor)
+      if (!pairMap.has(pairKey)) {
+        pairMap.set(pairKey, { carrier: item.plan.carrier, doctor: item.doctor, result: item.result })
+      }
+    }
+
+    const pairs = [...pairMap.entries()]
+    const npis = [...new Set(pairs.map(([, pair]) => pair.doctor.npi))]
+    const carriers = [...new Set(pairs.map(([, pair]) => pair.carrier))]
+
     const { data: providerData } = await admin
       .from('medicare_network_providers')
       .select('id, carrier, npi, practitioner_id, full_name, specialty, address_line1, city, state, zip_code, source_url, source_updated_at')
-      .eq('carrier', plan.carrier)
-      .eq('npi', doctor.npi)
+      .in('npi', npis)
+      .in('carrier', carriers)
       .eq('state', 'MS')
-      .eq('zip_code', cleanZip(doctor.postal_code))
-      .limit(20)
 
     const providers = (providerData || []) as ProviderRow[]
-    let provider = providers.find((row) => sameSelectedLocation(row, doctor)) || null
+    const providerByPair = new Map<string, ProviderRow>()
+    const missingPairs: Array<[string, { carrier: string; doctor: SelectedDoctor; result: LiveNetworkResult }]> = []
 
-    if (!provider) {
-      const { data: inserted } = await admin
-        .from('medicare_network_providers')
-        .insert({
-          carrier: plan.carrier,
-          npi: doctor.npi,
-          practitioner_id: result.practitioner_id,
-          full_name: doctor.name,
-          address_line1: doctor.address || null,
-          city: doctor.city || null,
-          state: doctor.state || 'MS',
-          zip_code: cleanZip(doctor.postal_code),
-          source_url: result.source_url,
-          source_updated_at: result.verified_at,
-          updated_at: new Date().toISOString()
-        })
-        .select('id, carrier, npi, practitioner_id, full_name, specialty, address_line1, city, state, zip_code, source_url, source_updated_at')
-        .single()
-      provider = inserted as ProviderRow | null
-    } else {
-      await admin
-        .from('medicare_network_providers')
-        .update({
-          practitioner_id: result.practitioner_id || provider.practitioner_id,
-          source_url: result.source_url || provider.source_url,
-          source_updated_at: result.verified_at,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', provider.id)
+    for (const [pairKey, pair] of pairs) {
+      const provider = providers.find((row) => row.carrier === pair.carrier && sameSelectedLocation(row, pair.doctor))
+      if (provider) providerByPair.set(pairKey, provider)
+      else missingPairs.push([pairKey, pair])
     }
 
-    if (!provider?.id) return
+    if (missingPairs.length) {
+      const now = new Date().toISOString()
+      const { data: inserted } = await admin
+        .from('medicare_network_providers')
+        .insert(missingPairs.map(([, pair]) => ({
+          carrier: pair.carrier,
+          npi: pair.doctor.npi,
+          practitioner_id: pair.result.practitioner_id,
+          full_name: pair.doctor.name,
+          address_line1: pair.doctor.address || null,
+          city: pair.doctor.city || null,
+          state: pair.doctor.state || 'MS',
+          zip_code: cleanZip(pair.doctor.postal_code),
+          source_url: pair.result.source_url,
+          source_updated_at: pair.result.verified_at,
+          updated_at: now
+        })))
+        .select('id, carrier, npi, practitioner_id, full_name, specialty, address_line1, city, state, zip_code, source_url, source_updated_at')
 
-    const networkId = `live:${plan.carrier}:${plan.contract_id}-${plan.plan_id}-${plan.segment_id || '0'}`
-    await admin
-      .from('medicare_provider_plan_networks')
-      .upsert({
+      const insertedProviders = (inserted || []) as ProviderRow[]
+      for (const [pairKey, pair] of missingPairs) {
+        const provider = insertedProviders.find((row) => row.carrier === pair.carrier && sameSelectedLocation(row, pair.doctor))
+        if (provider) providerByPair.set(pairKey, provider)
+      }
+    }
+
+    const networkUpserts = verified.flatMap(({ doctor, plan, result }) => {
+      const provider = providerByPair.get(doctorCarrierKey(plan.carrier, doctor))
+      if (!provider?.id || !result.verified_at) return []
+      return [{
         provider_id: provider.id,
         medicare_plan_id: plan.id,
-        network_id: networkId,
+        network_id: `live:${plan.carrier}:${plan.contract_id}-${plan.plan_id}-${plan.segment_id || '0'}`,
         in_network: result.status === 'in_network',
         source_url: result.source_url,
         verified_at: result.verified_at
-      }, {
-        onConflict: 'provider_id,medicare_plan_id,network_id'
-      })
+      }]
+    })
+
+    if (networkUpserts.length) {
+      await admin
+        .from('medicare_provider_plan_networks')
+        .upsert(networkUpserts, { onConflict: 'provider_id,medicare_plan_id,network_id' })
+    }
   } catch {
     // Live verification remains useful even if server-side cache credentials are absent.
   }
@@ -270,7 +310,9 @@ export async function POST(request: NextRequest) {
       if (providerIdsByDoctorCarrier.has(key)) continue
       providerIdsByDoctorCarrier.set(
         key,
-        providers.filter((provider) => provider.carrier === plan.carrier && sameSelectedLocation(provider, doctor)).map((provider) => provider.id)
+        providers
+          .filter((provider) => provider.carrier === plan.carrier && sameSelectedLocation(provider, doctor))
+          .map((provider) => provider.id)
       )
     }
   }
@@ -286,45 +328,82 @@ export async function POST(request: NextRequest) {
     networkRows = (networkData || []) as NetworkRow[]
   }
 
+  const freshNetworkByPlanProvider = new Map<string, NetworkRow>()
+  for (const row of networkRows) {
+    if (!isFresh(row.verified_at)) continue
+    const key = `${row.medicare_plan_id}|${row.provider_id}`
+    const existing = freshNetworkByPlanProvider.get(key)
+    if (!existing || new Date(row.verified_at || 0).getTime() > new Date(existing.verified_at || 0).getTime()) {
+      freshNetworkByPlanProvider.set(key, row)
+    }
+  }
+
   const resultMatrix = new Map<string, DoctorMatch>()
-  const liveChecks: Array<{ doctor: SelectedDoctor; plan: PlanRow; key: string }> = []
+  const liveChecks: LiveCheck[] = []
+  const supportByCarrier = new Map(
+    [...new Set(plans.map((plan) => plan.carrier))].map((carrier) => [carrier, carrierLiveSupport(carrier)])
+  )
 
   for (const planId of planIds) {
     const plan = planById.get(planId)
     if (!plan) continue
+
     for (const doctor of doctors) {
       const key = `${plan.id}|${doctor.slot_id}`
-      const providerIds = new Set(providerIdsByDoctorCarrier.get(`${doctor.slot_id}|${plan.carrier}`) || [])
-      const cached = networkRows
-        .filter((row) => row.medicare_plan_id === plan.id && providerIds.has(row.provider_id) && isFresh(row.verified_at))
-        .sort((a, b) => new Date(b.verified_at || 0).getTime() - new Date(a.verified_at || 0).getTime())[0]
+      const providerIds = providerIdsByDoctorCarrier.get(`${doctor.slot_id}|${plan.carrier}`) || []
+      let cached: NetworkRow | undefined
 
-      if (cached) resultMatrix.set(key, cacheMatch(doctor, cached))
-      else liveChecks.push({ doctor, plan, key })
+      for (const providerId of providerIds) {
+        const row = freshNetworkByPlanProvider.get(`${plan.id}|${providerId}`)
+        if (!row) continue
+        if (!cached || new Date(row.verified_at || 0).getTime() > new Date(cached.verified_at || 0).getTime()) cached = row
+      }
+
+      if (cached) {
+        resultMatrix.set(key, cacheMatch(doctor, cached))
+        continue
+      }
+
+      const support = supportByCarrier.get(plan.carrier)
+      if (!support?.connected) {
+        resultMatrix.set(key, emptyMatch(doctor, 'source_unavailable', support?.message || `${plan.carrier} provider directory is not connected.`))
+        continue
+      }
+
+      liveChecks.push({ doctor, plan, key })
     }
   }
 
   const liveSettled = await settleWithConcurrency(
     liveChecks,
     LIVE_CHECK_CONCURRENCY,
-    async ({ doctor, plan, key }) => {
-      const result = await verifyDoctorForPlan(doctor, plan)
-      if (result.status === 'in_network' || result.status === 'out_of_network') {
-        await persistLiveResult(doctor, plan, result)
-      }
-      return { key, doctor, plan, result }
-    }
+    async ({ doctor, plan, key }) => ({
+      key,
+      doctor,
+      plan,
+      result: await verifyDoctorForPlan(doctor, plan)
+    })
   )
 
+  const toPersist: LivePersistItem[] = []
   for (let index = 0; index < liveSettled.length; index += 1) {
     const settled = liveSettled[index]
     const source = liveChecks[index]
     if (settled.status === 'fulfilled') {
       resultMatrix.set(settled.value.key, liveMatch(settled.value.doctor, settled.value.result))
+      if (settled.value.result.status === 'in_network' || settled.value.result.status === 'out_of_network') {
+        toPersist.push({
+          doctor: settled.value.doctor,
+          plan: settled.value.plan,
+          result: settled.value.result
+        })
+      }
     } else if (source) {
       resultMatrix.set(source.key, emptyMatch(source.doctor, 'not_verified', `${source.plan.carrier} live verification failed for this request.`))
     }
   }
+
+  await persistLiveResults(toPersist)
 
   let verifiedMatches = 0
   let unavailableMatches = 0
@@ -345,8 +424,9 @@ export async function POST(request: NextRequest) {
     }]
   }))
 
-  const carriers = [...new Set(plans.map((plan) => plan.carrier))]
-  const carrierSupport = Object.fromEntries(carriers.map((carrier) => [carrier, carrierLiveSupport(carrier)]))
+  const carrierSupport = Object.fromEntries(
+    [...supportByCarrier.entries()].map(([carrier, support]) => [carrier, support])
+  )
 
   return NextResponse.json({
     available: true,
@@ -355,6 +435,8 @@ export async function POST(request: NextRequest) {
     unavailable_matches: unavailableMatches,
     carrier_support: carrierSupport,
     cache_max_age_days: 7,
+    live_checks_requested: liveChecks.length,
+    bulk_cache_write: true,
     message: verifiedMatches
       ? 'Doctor network results include live carrier checks and recent verified cache records.'
       : 'No plan/doctor match could be verified from a connected carrier directory yet.'
