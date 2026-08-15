@@ -1,0 +1,77 @@
+name: CMS Compensation Audit
+
+on:
+  push:
+    paths:
+      - '.github/workflows/cms-compensation-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download CMS 2026 compensation data
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -A 'Mozilla/5.0' 'https://www.cms.gov/files/zip/cy-2026-agent-broker-compensation-data.zip' -o /tmp/cms-comp.zip
+          mkdir -p /tmp/cms-comp
+          unzip -o /tmp/cms-comp.zip -d /tmp/cms-comp
+          find /tmp/cms-comp -maxdepth 2 -type f -printf '%p\n'
+
+      - name: Install spreadsheet readers
+        run: python -m pip install --quiet pandas openpyxl xlrd
+
+      - name: Print Mississippi compensation records
+        run: |
+          python - <<'PY'
+          import glob, os, re, json
+          import pandas as pd
+
+          files = glob.glob('/tmp/cms-comp/**/*', recursive=True)
+          files = [p for p in files if os.path.isfile(p)]
+          print('FILES:', files)
+
+          frames = []
+          for p in files:
+              low = p.lower()
+              try:
+                  if low.endswith('.csv'):
+                      df = pd.read_csv(p, dtype=str, keep_default_na=False, encoding_errors='replace')
+                  elif low.endswith(('.xlsx','.xls')):
+                      df = pd.read_excel(p, dtype=str, keep_default_na=False)
+                  elif low.endswith('.txt'):
+                      df = pd.read_csv(p, dtype=str, keep_default_na=False, sep=None, engine='python', encoding_errors='replace')
+                  else:
+                      continue
+                  print('COLUMNS', os.path.basename(p), list(df.columns))
+                  df['_source_file'] = os.path.basename(p)
+                  frames.append(df)
+              except Exception as e:
+                  print('READ_ERROR', p, repr(e))
+
+          if not frames:
+              raise SystemExit('No readable CMS data file found')
+
+          data = pd.concat(frames, ignore_index=True, sort=False).fillna('')
+          cols = list(data.columns)
+          state_cols = [c for c in cols if re.search(r'(^|\b)(state|st)(\b|$)', str(c), re.I)]
+          print('STATE_COLUMNS', state_cols)
+          if state_cols:
+              mask = False
+              for c in state_cols:
+                  vals = data[c].astype(str).str.strip().str.upper()
+                  mask = mask | vals.isin(['MS','MISSISSIPPI'])
+              ms = data[mask].copy()
+          else:
+              # Fallback searches rows for explicit Mississippi marker.
+              mask = data.astype(str).apply(lambda col: col.str.contains(r'\b(MS|MISSISSIPPI)\b', case=False, regex=True)).any(axis=1)
+              ms = data[mask].copy()
+
+          print('MISSISSIPPI_ROWS', len(ms))
+          # Print records as JSON lines so contract/plan/segment and compensation fields are preserved exactly.
+          for rec in ms.to_dict(orient='records'):
+              print('MS_RECORD ' + json.dumps({str(k): str(v) for k,v in rec.items()}, ensure_ascii=False))
+          PY
