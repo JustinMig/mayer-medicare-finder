@@ -19,7 +19,7 @@ export default async function MedicareFinderHome() {
     <div className="medicare-standalone-shell">
       <header className="medicare-standalone-topbar">
         <div className="medicare-standalone-brand">
-          <img src="/mayer-bear.png" alt="Mayer Insurance Group bear" />
+          <img src="/mayer-logo.svg" alt="Mayer Insurance Group logo" />
           <div>
             <strong>Mayer Insurance Group</strong>
             <span>Medicare Plan Finder</span>
