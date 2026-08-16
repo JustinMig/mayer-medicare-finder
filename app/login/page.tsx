@@ -30,7 +30,7 @@ export default function LoginPage() {
   return (
     <main className="login-shell">
       <section className="login-card">
-        <img className="login-bear" src="/mayer-bear.png" alt="Mayer Insurance Group bear" />
+        <img className="login-bear" src="/mayer-logo.svg" alt="Mayer Insurance Group logo" />
         <h1>Mayer Medicare</h1>
         <p className="subtle">Secure Medicare Plan Finder access</p>
         <form onSubmit={submit}>
