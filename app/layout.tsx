@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: 'Mayer Medicare Plan Finder',
   description: 'Mississippi Medicare Advantage plan comparison and provider-network finder.',
   applicationName: 'Mayer Medicare Finder',
+  manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -12,11 +13,15 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon.png', sizes: '512x512', type: 'image/png' }
+      { url: '/medicare-icon.png?size=192', sizes: '192x192', type: 'image/png' },
+      { url: '/medicare-icon.png?size=512', sizes: '512x512', type: 'image/png' }
     ],
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
-    shortcut: [{ url: '/mayer-favicon-64.png', sizes: '64x64', type: 'image/png' }]
+    apple: [
+      { url: '/medicare-icon.png?size=180', sizes: '180x180', type: 'image/png' }
+    ],
+    shortcut: [
+      { url: '/medicare-icon.png?size=64', sizes: '64x64', type: 'image/png' }
+    ]
   }
 }
 
