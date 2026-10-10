@@ -24,7 +24,7 @@ export async function updateSession(request: NextRequest) {
   const { data, error } = await supabase.auth.getClaims()
   const loggedIn = Boolean(data?.claims)
   const path = request.nextUrl.pathname
-  const publicPath = path === '/login' || path.startsWith('/auth/') || path === '/manifest.webmanifest' || path === '/sw.js' || path === '/icon.png' || path === '/mayer-bear.png' || path === '/icon.svg'
+  const publicPath = path === '/login' || path.startsWith('/auth/') || path === '/manifest.webmanifest' || path === '/sw.js' || path === '/icon.png' || path === '/mayer-bear.png' || path === '/icon.svg' || path.startsWith('/api/research/')
 
   // A stale/invalid refresh token can otherwise be retried on every request,
   // which is especially noticeable in Safari. Clear only Supabase auth cookies
