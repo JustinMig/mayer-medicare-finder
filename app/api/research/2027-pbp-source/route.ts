@@ -1,0 +1,6 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { inflateRawSync } from 'node:zlib'
+export const runtime='nodejs'; export const maxDuration=120
+const URL='https://www.cms.gov/files/zip/pbp-benefits-2027.zip'
+function eocd(b:Buffer){const m=Math.max(0,b.length-65557);for(let o=b.length-22;o>=m;o--)if(b.readUInt32LE(o)===0x06054b50)return o;return -1}
+export async function GET(req:NextRequest){const target=req.nextUrl.searchParams.get('file')||'pbp_b13_other_services.sas';const r=await fetch(URL,{cache:'no-store'});const b=Buffer.from(await r.arrayBuffer()),e=eocd(b);if(e<0)throw new Error('zip');const n=b.readUInt16LE(e+10),co=b.readUInt32LE(e+16);let p=co;for(let i=0;i<n;i++){if(b.readUInt32LE(p)!==0x02014b50)break;const method=b.readUInt16LE(p+10),size=b.readUInt32LE(p+20),fn=b.readUInt16LE(p+28),ex=b.readUInt16LE(p+30),cm=b.readUInt16LE(p+32),lo=b.readUInt32LE(p+42),name=b.subarray(p+46,p+46+fn).toString('utf8');p+=46+fn+ex+cm;if(name!==target)continue;const lfn=b.readUInt16LE(lo+26),lex=b.readUInt16LE(lo+28),st=lo+30+lfn+lex,comp=b.subarray(st,st+size),raw=method===0?comp:method===8?inflateRawSync(comp):null;return new NextResponse(raw?.toString('utf8')||'',{headers:{'Content-Type':'text/plain','Cache-Control':'no-store'}})}return new NextResponse('not found',{status:404})}
