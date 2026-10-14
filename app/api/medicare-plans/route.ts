@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.from('medicare_plan_counties').select(`
     county_name,
     medicare_plans!inner(
-      id, carrier, plan_name, contract_id, plan_id, segment_id, plan_type,
+      id, plan_year, carrier, plan_name, contract_id, plan_id, segment_id, plan_type,
       snp_indicator, snp_type, dsnp_integration_status, zero_dollar_cost_sharing_dsnp,
       monthly_premium, moop_in_network, pcp_copay, specialist_copay,
       inpatient_hospital, ambulance_copay, emergency_room_copay, urgent_care_copay,
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
       cms_source_date, q1_source_url, source_note,
       structured_benefits_source, structured_benefits_verified_at
     )
-  `).eq('state', 'MS').ilike('county_name', county).order('county_name')
+  `).eq('state', 'MS').eq('medicare_plans.plan_year', 2027).eq('medicare_plans.commissionable', true).ilike('county_name', county).order('county_name')
 
   if (error) return NextResponse.json({ error: 'Unable to load Medicare plans' }, { status: 500 })
 
@@ -178,11 +178,11 @@ export async function GET(request: NextRequest) {
       emergency_room_copay: plan.emergency_room_copay || detailString(details, 'emergency_room_copay') || summaryLine(details, /emergency room|emergency care/i),
       urgent_care_copay: plan.urgent_care_copay || detailString(details, 'urgent_care_copay') || summaryLine(details, /urgent care/i),
       drug_deductible: plan.drug_deductible || detailString(details, 'drug_deductible'),
-      drug_oop_cap: plan.drug_oop_cap || `${moneyString(PART_D_OOP_CAP_2026)} / year for covered Part D drugs`,
-      benefit_source: plan.cms_pbp_imported_at ? 'CMS PBP Benefits 2026 JSON' : plan.structured_benefits_source || 'CMS/Q1 reference',
+      drug_oop_cap: plan.drug_oop_cap || `${moneyString(PART_D_OOP_CAP_2027)} / year for covered Part D drugs`,
+      benefit_source: plan.structured_benefits_source || (plan.cms_pbp_imported_at ? 'CMS PBP Benefits 2027 / carrier verified' : '2027 CMS + carrier documents + Q1 cross-check'),
       medicaid_match_status: !isDsnp(plan) ? 'not_required' : plan.medicaid_level_status === 'verified' ? 'verified' : medicaid === 'none' ? 'not_selected' : 'needs_verification'
     }
   })
 
-  return NextResponse.json({ county: exactRows[0]?.county_name || county, medicaid, plan_year: 2026, results, count: results.length, cms_source_date: results.find((plan) => plan.cms_source_date)?.cms_source_date || '2026-08-10', part_b_standard_premium_2026: PART_B_STANDARD_PREMIUM_2026, part_d_oop_cap_2026: PART_D_OOP_CAP_2026 }, { headers: { 'Cache-Control': 'private, max-age=120, stale-while-revalidate=600' } })
+  return NextResponse.json({ county: exactRows[0]?.county_name || county, medicaid, plan_year: 2027, results, count: results.length, cms_source_date: results.find((plan) => plan.cms_source_date)?.cms_source_date || '2026-10-13', part_b_standard_premium_2027: null, part_d_oop_cap_2027: PART_D_OOP_CAP_2027 }, { headers: { 'Cache-Control': 'private, max-age=120, stale-while-revalidate=600' } })
 }
