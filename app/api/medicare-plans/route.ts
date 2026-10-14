@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 const MEDICAID_LEVELS = new Set(['none', 'qmb', 'slmb', 'qi', 'fbde', 'other'])
-const PART_B_STANDARD_PREMIUM_2026 = 202.90
-const PART_D_OOP_CAP_2026 = 2100
+const PART_D_OOP_CAP_2027 = 2400
 
 type BenefitDetails = Record<string, unknown>
 
 type MedicarePlanRow = {
   id: string
+  plan_year: number
   carrier: string
   plan_name: string
   contract_id: string
