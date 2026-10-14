@@ -150,8 +150,6 @@ export async function GET(request: NextRequest) {
     const otcAllowance = recurringAllowance(details, 'otc', plan.otc_benefit)
     const foodAllowance = recurringAllowance(details, 'food', plan.food_benefit)
     const partBCredit = partBGiveback(details)
-    const givebackAmount = numericMoney(partBCredit)
-    const netPartB = Math.max(0, PART_B_STANDARD_PREMIUM_2026 - (givebackAmount || 0))
 
     return {
       ...plan,
@@ -159,9 +157,9 @@ export async function GET(request: NextRequest) {
       cms_pbp_extracted: undefined,
       plan_key: `${plan.contract_id}-${plan.plan_id}${plan.segment_id && plan.segment_id !== '0' ? `-${plan.segment_id}` : ''}`,
       is_dsnp: isDsnp(plan),
-      part_b_standard_premium: `${moneyString(PART_B_STANDARD_PREMIUM_2026)} / month`,
+      part_b_standard_premium: null,
       part_b_credit: partBCredit,
-      part_b_net_standard_cost: `${moneyString(netPartB)} / month`,
+      part_b_net_standard_cost: null,
       dental_annual_allowance: dentalAnnualAllowance,
       vision_annual_allowance: visionAnnualAllowance,
       hearing_annual_allowance: hearingAnnualAllowance,
