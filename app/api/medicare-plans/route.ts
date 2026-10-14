@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-const MEDICAID_LEVELS = new Set(['none', 'qmb', 'slmb', 'qi', 'fbde', 'other'])
-const PART_B_STANDARD_PREMIUM_2026 = 202.90
-const PART_D_OOP_CAP_2026 = 2100
+const MEDICAID_LEVELS = new Set(['none', 'qmb', 'qmb+', 'slmb', 'slmb+', 'qi', 'qdwi', 'fbde', 'other'])
+const PART_D_OOP_CAP_2027 = 2400
 
 type BenefitDetails = Record<string, unknown>
 
@@ -46,6 +45,7 @@ type MedicarePlanRow = {
   source_note: string | null
   structured_benefits_source: string | null
   structured_benefits_verified_at: string | null
+  commissionable: boolean | null
 }
 
 type CountyJoinRow = { county_name: string; medicare_plans: MedicarePlanRow | MedicarePlanRow[] | null }
@@ -61,8 +61,6 @@ function moneyString(value: string | number) {
   if (!Number.isFinite(numeric)) return String(value).trim()
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: numeric % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(numeric)
 }
-function numericMoney(value: string | null | undefined) { if (!value) return null; const match = value.replace(/,/g, '').match(/\$?(-?\d+(?:\.\d+)?)/); const amount = Number(match?.[1]); return Number.isFinite(amount) ? amount : null }
-
 function annualAllowanceFromText(value: string | null) {
   if (!value || /not covered/i.test(value)) return null
   const candidates: number[] = []
@@ -122,9 +120,9 @@ export async function GET(request: NextRequest) {
       vision_benefit, hearing_benefit, medicaid_levels, medicaid_level_status,
       benefit_details, cms_pbp_extracted, cms_pbp_source_url, cms_pbp_imported_at,
       cms_source_date, q1_source_url, source_note,
-      structured_benefits_source, structured_benefits_verified_at
+      structured_benefits_source, structured_benefits_verified_at, commissionable
     )
-  `).eq('state', 'MS').ilike('county_name', county).order('county_name')
+  `).eq('state', 'MS').eq('medicare_plans.plan_year', 2027).ilike('county_name', county).order('county_name')
 
   if (error) return NextResponse.json({ error: 'Unable to load Medicare plans' }, { status: 500 })
 
@@ -150,8 +148,9 @@ export async function GET(request: NextRequest) {
     const otcAllowance = recurringAllowance(details, 'otc', plan.otc_benefit)
     const foodAllowance = recurringAllowance(details, 'food', plan.food_benefit)
     const partBCredit = partBGiveback(details)
-    const givebackAmount = numericMoney(partBCredit)
-    const netPartB = Math.max(0, PART_B_STANDARD_PREMIUM_2026 - (givebackAmount || 0))
+    const medicalDeductible = detailString(details, 'medical_deductible')
+    const transportation = detailString(details, 'transportation')
+    const rxTierSummary = detailString(details, 'rx_tier_summary') || plan.drug_benefit_notes
 
     return {
       ...plan,
@@ -159,9 +158,12 @@ export async function GET(request: NextRequest) {
       cms_pbp_extracted: undefined,
       plan_key: `${plan.contract_id}-${plan.plan_id}${plan.segment_id && plan.segment_id !== '0' ? `-${plan.segment_id}` : ''}`,
       is_dsnp: isDsnp(plan),
-      part_b_standard_premium: `${moneyString(PART_B_STANDARD_PREMIUM_2026)} / month`,
+      part_b_standard_premium: 'Pending final CMS 2027 amount',
       part_b_credit: partBCredit,
-      part_b_net_standard_cost: `${moneyString(netPartB)} / month`,
+      part_b_net_standard_cost: partBCredit ? 'Pending final CMS 2027 Part B premium' : 'Pending final CMS 2027 amount',
+      medical_deductible: medicalDeductible,
+      transportation,
+      rx_tier_summary: rxTierSummary,
       dental_annual_allowance: dentalAnnualAllowance,
       vision_annual_allowance: visionAnnualAllowance,
       hearing_annual_allowance: hearingAnnualAllowance,
@@ -178,11 +180,11 @@ export async function GET(request: NextRequest) {
       emergency_room_copay: plan.emergency_room_copay || detailString(details, 'emergency_room_copay') || summaryLine(details, /emergency room|emergency care/i),
       urgent_care_copay: plan.urgent_care_copay || detailString(details, 'urgent_care_copay') || summaryLine(details, /urgent care/i),
       drug_deductible: plan.drug_deductible || detailString(details, 'drug_deductible'),
-      drug_oop_cap: plan.drug_oop_cap || `${moneyString(PART_D_OOP_CAP_2026)} / year for covered Part D drugs`,
-      benefit_source: plan.cms_pbp_imported_at ? 'CMS PBP Benefits 2026 JSON' : plan.structured_benefits_source || 'CMS/Q1 reference',
+      drug_oop_cap: plan.drug_oop_cap || `${moneyString(PART_D_OOP_CAP_2027)} / year for covered Part D drugs`,
+      benefit_source: plan.cms_pbp_imported_at ? 'CMS PBP Benefits 2027 / carrier 2027 materials' : plan.structured_benefits_source || 'CMS 2027 / carrier 2027 materials',
       medicaid_match_status: !isDsnp(plan) ? 'not_required' : plan.medicaid_level_status === 'verified' ? 'verified' : medicaid === 'none' ? 'not_selected' : 'needs_verification'
     }
   })
 
-  return NextResponse.json({ county: exactRows[0]?.county_name || county, medicaid, plan_year: 2026, results, count: results.length, cms_source_date: results.find((plan) => plan.cms_source_date)?.cms_source_date || '2026-08-10', part_b_standard_premium_2026: PART_B_STANDARD_PREMIUM_2026, part_d_oop_cap_2026: PART_D_OOP_CAP_2026 }, { headers: { 'Cache-Control': 'private, max-age=120, stale-while-revalidate=600' } })
+  return NextResponse.json({ county: exactRows[0]?.county_name || county, medicaid, plan_year: 2027, results, count: results.length, cms_source_date: results.find((plan) => plan.cms_source_date)?.cms_source_date || '2026-09-30', part_b_standard_premium_2027: null, part_b_standard_premium_status: 'pending_final_cms', part_d_oop_cap_2027: PART_D_OOP_CAP_2027 }, { headers: { 'Cache-Control': 'private, max-age=120, stale-while-revalidate=600' } })
 }
